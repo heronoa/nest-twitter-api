@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { twitterClient } from './config/twitterClient';
+import { TwitterService } from './config/twitter.services';
 import { PrismaService } from './database/prisma.services';
+import { ETwitterStreamEvent } from 'twitter-api-v2';
 
 @Injectable()
 export class AppService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private twitter: TwitterService,
+  ) {}
 
   getHello(): string {
     return 'Hello World!';
@@ -14,54 +18,144 @@ export class AppService {
     try {
       console.log('[start] Twitter API me route');
 
-      const lookupTweetById = await twitterClient.v2
-        .me()
-        .catch((err) => console.log('Twitter Error', err));
+      const userV2 = await this.twitter.client.currentUserV2();
+      const userV1 = await this.twitter.client.currentUser();
 
-      return lookupTweetById;
+      return {
+        user: {
+          v1: userV1,
+          v2: userV2,
+        },
+      };
     } catch (err) {
+      (err) => console.log('Twitter Error', err);
       return err;
     }
   }
 
-  async twitterPost(): Promise<any> {
+  async getTweets(id): Promise<any> {
     try {
-      console.log('[start] Twitter API create tweet');
+      if (id === '') {
+        throw new Error('Missing Id parameter');
+      }
 
-      const txt = 'It works!';
+      console.log('[start] Twitter API Tweets route');
 
-      const tweet = await twitterClient.v2.tweet(txt);
+      const tweets = await this.twitter.client.search(
+        'javascript from:erickwendel_ -is:retweet',
+      );
 
-      await this.prisma.tweets.create({
-        data: {
-          id: tweet.data.id as string,
-          text: txt,
-          date: String(Date.now()),
-        },
+      return tweets.data;
+    } catch (err) {
+      console.log(err);
+      return err;
+    }
+  }
+
+  async listenToHashtag(): Promise<void> {
+    try {
+      const client = this.twitter.client;
+      const meAsUser = await this.twitter.client.currentUserV2();
+
+      const rules = await client.v2.streamRules();
+      // Delete pre existing rules
+      if (rules.data?.length) {
+        await client.v2.updateStreamRules({
+          delete: { ids: rules.data.map((rule) => rule.id) },
+        });
+      }
+
+      // Add our rules
+      await client.v2.updateStreamRules({
+        add: [{ tag: 'Find Javascript tags', value: '#js ' }],
       });
 
-      return tweet;
-      // console.log('Tweet Result', tweet);
-    } catch (err) {
-      return err;
-    }
-  }
-  async twitterDelete(id: string): Promise<any> {
-    try {
-      console.log('[start] Twitter API delete tweet');
+      const stream = await client.v2
+        .searchStream({
+          'tweet.fields': ['referenced_tweets', 'author_id'],
+          expansions: ['referenced_tweets.id'],
+        })
+        .catch((err) => {
+          console.log(err);
+          return err;
+        });
+      // Enable auto reconnect
+      stream.autoReconnect = true;
 
-      const tweet = await twitterClient.v2.deleteTweet(id);
+      stream.on(ETwitterStreamEvent.Data, async (tweet) => {
+        // Ignore RTs or self-sent tweets
+        const isARt =
+          tweet.data.referenced_tweets?.some(
+            (tweet) => tweet.type === 'retweeted',
+          ) ?? false;
+        if (isARt || tweet.data.author_id === meAsUser.data.id) {
+          return;
+        }
 
-      await this.prisma.tweets.delete({
-        where: {
-          id,
-        },
+        console.log({ tweet });
+
+        // save on prisma
+
+        this.prisma.tweets.create({
+          data: {
+            text: tweet.data.text,
+            date:
+              String(new Date(tweet.data.created_at).getTime()) ||
+              String(Date.now()),
+            id: tweet.data.id,
+          },
+        });
+
+        // Reply to tweet
+        // await client.v1.reply(
+        //   'Did you talk about JavaScript? love it!',
+        //   tweet.data.id,
+        // );
       });
-
-      return tweet;
-      // console.log('Tweet Result', tweet);
     } catch (err) {
+      console.log(err);
       return err;
     }
   }
+
+  // async twitterPost(): Promise<any> {
+  //   try {
+  //     console.log('[start] Twitter API create tweet');
+
+  //     const txt = 'It works!';
+
+  //     const tweet = await this.twitter.client.v2.tweet(txt);
+
+  //     await this.prisma.tweets.create({
+  //       data: {
+  //         id: tweet.data.id as string,
+  //         text: txt,
+  //         date: String(Date.now()),
+  //       },
+  //     });
+
+  //     return tweet;
+  //     // console.log('Tweet Result', tweet);
+  //   } catch (err) {
+  //     return err;
+  //   }
+  // }
+  // async twitterDelete(id: string): Promise<any> {
+  //   try {
+  //     console.log('[start] Twitter API delete tweet');
+
+  //     const tweet = await this.twitter.client.v2.deleteTweet(id);
+
+  //     await this.prisma.tweets.delete({
+  //       where: {
+  //         id,
+  //       },
+  //     });
+
+  //     return tweet;
+  //     // console.log('Tweet Result', tweet);
+  //   } catch (err) {
+  //     return err;
+  //   }
+  // }
 }
