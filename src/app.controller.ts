@@ -1,6 +1,6 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { AppService } from './app.service';
-import { ApiResponse } from '@nestjs/swagger';
+import { ApiParam, ApiQuery, ApiResponse } from '@nestjs/swagger';
 
 @Controller()
 export class AppController {
@@ -35,15 +35,39 @@ export class AppController {
     return this.appService.listenToHashtag();
   }
 
-  @Get('twitter/tweets/:id')
+  @Get('twitter/tweets/:username')
+  @ApiParam({
+    name: 'username',
+    type: 'string',
+    required: true,
+  })
+  @ApiQuery({
+    name: 'q',
+    type: 'string',
+    required: false,
+  })
   @ApiResponse({
     status: 0,
     description:
-      'Twitter route to post a tweet with the bot account. That route post a tweet writing "It works!" and add to the prisma database the tweet id, the tweet txt and the timestamp of the tweet',
+      'Twitter route to get the tweets from a user thoguh query you can filter from using twitter queries',
   })
-  getTweets(@Param() params: { id: string }): Promise<any> {
-    return this.appService.getTweets(params?.id || '');
+  getTweets(
+    @Param() params: { username: string },
+    @Query('q') q?: string,
+  ): Promise<any> {
+    return this.appService.getTweets(params?.username || '', q);
   }
+
+  @Get('twitter/stream/rules')
+  setStreamRule(): Promise<any> {
+    return this.appService.setStreamRules();
+  }
+
+  @Get('twitter/stream')
+  getStream(): Promise<any> {
+    return this.appService.getStream();
+  }
+
   // @Get('twitter/post/test')
   // @ApiResponse({
   //   status: 0,

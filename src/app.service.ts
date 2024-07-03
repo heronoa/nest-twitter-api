@@ -14,6 +14,50 @@ export class AppService {
     return 'Hello World!';
   }
 
+  async setStreamRules(): Promise<any> {
+    try {
+      const client = this.twitter.client;
+
+      const rules = await client.v2.streamRules();
+      // Delete pre existing rules
+      if (rules.data?.length) {
+        await client.v2.updateStreamRules({
+          delete: { ids: rules.data.map((rule) => rule.id) },
+        });
+      }
+
+      // Add our rules
+      await client.v2.updateStreamRules({
+        add: [{ tag: 'Find Javascript tags', value: 'javascript' }],
+      });
+    } catch (err) {
+      console.log('[Twitter Error] ' + err);
+    }
+  }
+
+  async getStream(): Promise<any> {
+    try {
+      const client = this.twitter.client;
+
+      const stream = await client.v2
+        .searchStream({
+          'tweet.fields': ['referenced_tweets', 'author_id'],
+          expansions: ['referenced_tweets.id'],
+        })
+        .catch((err) => {
+          console.log(err);
+          return err;
+        });
+      // Enable auto reconnect
+      stream.autoReconnect = true;
+
+      return stream;
+    } catch (err) {
+      (err) => console.log('Twitter Error', err);
+      return err;
+    }
+  }
+
   async twitterMe(): Promise<any> {
     try {
       console.log('[start] Twitter API me route');
@@ -33,16 +77,19 @@ export class AppService {
     }
   }
 
-  async getTweets(id): Promise<any> {
+  async getTweets(username: string, query = ''): Promise<any> {
     try {
-      if (id === '') {
-        throw new Error('Missing Id parameter');
+      if (username === '') {
+        throw new Error('Missing username parameter');
       }
 
-      console.log('[start] Twitter API Tweets route');
+      console.log(
+        '[start] Twitter API Tweets route',
+        `Params: ${username}, ${query}`,
+      );
 
       const tweets = await this.twitter.client.search(
-        'javascript from:erickwendel_ -is:retweet',
+        `from:${username} ${query}`,
       );
 
       return tweets.data;
